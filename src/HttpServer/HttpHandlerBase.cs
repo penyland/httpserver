@@ -9,7 +9,7 @@ namespace HttpServer
 {
     public abstract class HttpHandlerBase : IHttpHandler
     {
-        public virtual String Name { get { return "HttpHandlerBase"; } }
+        public virtual string Name { get { return "HttpHandlerBase"; } }
 
         // handlers for incoming request
         protected Dictionary<string, IHttpHandler> Handlers = new Dictionary<string, IHttpHandler>();
@@ -107,7 +107,7 @@ namespace HttpServer
         /// <param name="handler">HTTP handler for the incoming request on specified URL</param>
         public virtual void RegisterHandler(string url, IHttpHandler handler)
         {
-            if (handler != null && (url != null) && (url != String.Empty))
+            if (handler != null && (url != null) && (url != string.Empty))
                 this.Handlers.Add(url.Trim('/').ToLower(), handler);
             else
                 throw new ArgumentNullException("url parameter cannot be null or empty");

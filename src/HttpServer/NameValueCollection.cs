@@ -14,7 +14,7 @@ namespace HttpServer
     {
         #region Fields ...
 
-        private Dictionary<string, string> values;
+        private readonly Dictionary<string, string> values;
 
         #endregion
 
@@ -65,6 +65,7 @@ namespace HttpServer
             {
                 return (string)this.values[key];
             }
+
             set
             {
                 this.values[key] = value;
@@ -101,7 +102,7 @@ namespace HttpServer
         /// <returns>Key is into collection or not</returns>
         public bool ContainsKey(string key)
         {
-            if ((key == null) || (key == String.Empty))
+            if ((key == null) || (key == string.Empty))
                 throw new ArgumentNullException("key is null or empty");
             return this.values.ContainsKey(key);
         }

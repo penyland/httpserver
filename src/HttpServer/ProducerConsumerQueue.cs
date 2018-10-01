@@ -7,7 +7,7 @@ namespace HttpServer
 {
     class ProducerConsumerQueue : IDisposable
     {
-        BlockingCollection<Task> taskQueue = new BlockingCollection<Task>();
+        readonly BlockingCollection<Task> taskQueue = new BlockingCollection<Task>();
 
         public ProducerConsumerQueue(int workerCount)
         {

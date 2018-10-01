@@ -1,4 +1,6 @@
-﻿using System;
+﻿// Copyright (c) Peter Nylander.  All rights reserved.
+
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -29,7 +31,7 @@ namespace HttpServer
             // get real file path in webroot directory
             // string filePath = httpContext.Server.MapPath(httpContext.Request.URL.TrimStart('/'));
 
-            // return File.Exists(filePath);            
+            // return File.Exists(filePath);
         }
 
         #region IHttpHandler ...

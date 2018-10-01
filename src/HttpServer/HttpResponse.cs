@@ -1,11 +1,8 @@
-﻿using System;
-using System.Collections.Generic;
+﻿// Copyright (c) Peter Nylander.  All rights reserved.
+
+using System;
 using System.IO;
-using System.Linq;
 using System.Net;
-using System.Text;
-using System.Threading.Tasks;
-using Windows.Storage.Streams;
 
 namespace HttpServer
 {
@@ -15,22 +12,7 @@ namespace HttpServer
     public class HttpResponse : HttpBase, IDisposable
     {
         /// <summary>
-        /// Status code of the HTTP response
-        /// </summary>
-        public HttpStatusCode StatusCode { get; set; }
-
-        /// <summary>
-        /// HTTP response content type
-        /// </summary>
-        public string ContentType { get; set; }
-
-        /// <summary>
-        /// Response stream
-        /// </summary>
-        public Stream Stream { get; set; }
-
-        /// <summary>
-        /// Constructor
+        /// Initializes a new instance of the <see cref="HttpResponse"/> class.
         /// </summary>
         public HttpResponse()
             : base()
@@ -39,16 +21,28 @@ namespace HttpServer
             this.StatusCode = HttpStatusCode.OK;
             this.ContentType = "text/html";
         }
-    
+
+        /// <summary>
+        /// Gets or sets the status code of the HTTP response
+        /// </summary>
+        public HttpStatusCode StatusCode { get; set; }
+
+        /// <summary>
+        /// Gets or sets the HTTP response content type
+        /// </summary>
+        public string ContentType { get; set; }
+
+        /// <summary>
+        /// Gets or sets the response stream
+        /// </summary>
+        public Stream Stream { get; set; }
+
         /// <summary>
         /// Close response stream
         /// </summary>
         public void CloseStream()
         {
-            if (this.Stream != null)
-            {
-                this.Stream.Dispose();
-            }
+            this.Stream?.Dispose();
         }
 
         public void Dispose()

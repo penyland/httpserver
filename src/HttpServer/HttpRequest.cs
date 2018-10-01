@@ -1,11 +1,9 @@
-﻿using System;
-using System.Collections.Generic;
+﻿// Copyright (c) Peter Nylander.  All rights reserved.
+
+using HttpServer.Platform;
+using System;
 using System.Diagnostics;
-using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
-using Windows.Networking.Sockets;
-using Windows.Storage.Streams;
 
 namespace HttpServer
 {
@@ -15,48 +13,10 @@ namespace HttpServer
     public class HttpRequest : HttpBase
     {
         // size of request buffer
-        private const int BUFFER_REQUEST_SIZE = 1024;
+        private const int BUFFERREQUESTSIZE = 1024;
 
         /// <summary>
-        /// HTTP request method
-        /// </summary>
-        public HttpMethod HttpMethod { get; internal set; }
-
-        /// <summary>
-        /// URL request
-        /// </summary>
-        // public string URL { get; internal set; }
-        public string URL { get; set; }
-
-        /// <summary>
-        /// HTTP request protocol
-        /// </summary>
-        public string HttpProtocol { get; internal set; }
-
-        /// <summary>
-        /// HTTP query string
-        /// </summary>
-        public NameValueCollection QueryString { get; internal set; }
-
-        /// <summary>
-        /// HTTP form data
-        /// </summary>
-        public NameValueCollection Form { get; internal set; }
-
-        /// <summary>
-        /// Request Content type
-        /// </summary>
-        public string ContentType { get; internal set; }
-
-        /// <summary>
-        /// Request content length
-        /// </summary>
-        public long ContentLength { get; internal set; }
-
-        public string UserHostAddress { get; internal set; }
-
-        /// <summary>
-        /// Constructor
+        /// Initializes a new instance of the <see cref="HttpRequest"/> class.
         /// </summary>
         public HttpRequest()
             : base()
@@ -66,10 +26,48 @@ namespace HttpServer
         }
 
         /// <summary>
-        /// Parse the request 
+        /// Gets the HTTP request method
+        /// </summary>
+        public HttpMethod HttpMethod { get; internal set; }
+
+        /// <summary>
+        /// Gets or sets URL request
+        /// </summary>
+        public string URL { get; set; }
+
+        /// <summary>
+        /// Gets the HTTP request protocol
+        /// </summary>
+        public string HttpProtocol { get; internal set; }
+
+        /// <summary>
+        /// Gets the HTTP query string
+        /// </summary>
+        public NameValueCollection QueryString { get; internal set; }
+
+        /// <summary>
+        /// Gets the HTTP form data
+        /// </summary>
+        public NameValueCollection Form { get; internal set; }
+
+        /// <summary>
+        /// Gets the Request Content type
+        /// </summary>
+        public string ContentType { get; internal set; }
+
+        /// <summary>
+        /// Gets the Request content length
+        /// </summary>
+        public long ContentLength { get; internal set; }
+
+        public string UserHostAddress { get; internal set; }
+
+        /// <summary>
+        /// Parse the request
         /// </summary>
         /// <param name="requestSocket">Socket</param>
-        internal async static Task<HttpRequest> Parse(StreamSocket requestSocket)
+        /// <returns>A <see cref="Task"/> representing the asynchronous operation.</returns>
+        internal static async Task<HttpRequest> ParseAsync(ISocket requestSocket)
         {
             string request = string.Empty;
 
@@ -81,7 +79,7 @@ namespace HttpServer
             {
                 dataReader.InputStreamOptions = InputStreamOptions.Partial;
 
-                uint sizeFieldCount = await dataReader.LoadAsync(BUFFER_REQUEST_SIZE);
+                uint sizeFieldCount = await dataReader.LoadAsync(BUFFERREQUESTSIZE);
 
                 // Read HTTP Header
                 request = dataReader.ReadString(dataReader.UnconsumedBufferLength);
@@ -90,7 +88,7 @@ namespace HttpServer
 
             Debug.WriteLine(request);
 
-            HttpRequest httpRequest = new HttpRequest();
+            var httpRequest = new HttpRequest();
 
             httpRequest.UserHostAddress = requestSocket.Information.RemoteHostName.ToString();
 
@@ -98,6 +96,7 @@ namespace HttpServer
             string[] lines = request.Split(LF);
 
             int i = 0;
+
             // trim request line on carriage return
             lines[i] = lines[i].TrimEnd(CR);
 
@@ -119,18 +118,21 @@ namespace HttpServer
             if (idxQueryString != -1)
             {
                 string queryString = requestLineTokens[1].Substring(idxQueryString + 1);
-                if (queryString != String.Empty)
+                if (queryString != string.Empty)
                 {
                     string[] queryStringParams = queryString.Split(QUERY_STRING_PARAMS_SEPARATOR);
                     foreach (string queryStringParam in queryStringParams)
                     {
                         string[] queryStringParamTokens = queryStringParam.Split(QUERY_STRING_VALUE_SEPARATOR);
                         string queryStringParamValue = null;
+
                         // if there is key-value pair
                         if (queryStringParamTokens.Length == 2)
+                        {
                             queryStringParamValue = queryStringParamTokens[1];
+                        }
 
-            // httpRequest.QueryString.Add(queryStringParamTokens[0], HttpServerUtility.HtmlDecode(queryStringParamValue));
+                        // httpRequest.QueryString.Add(queryStringParamTokens[0], HttpServerUtility.HtmlDecode(queryStringParamValue));
                         httpRequest.QueryString.Add(queryStringParamTokens[0], Uri.UnescapeDataString(queryStringParamValue));
                     }
                 }
@@ -138,18 +140,22 @@ namespace HttpServer
 
             // next line (header start)
             i++;
+
             // trim end carriage return of each line
             lines[i] = lines[i].TrimEnd(CR);
 
             // headers end with empty string
-            while (lines[i] != String.Empty)
+            while (lines[i] != string.Empty)
             {
                 int separatorIndex = lines[i].IndexOf(HEADER_VALUE_SEPARATOR);
 
                 if (separatorIndex != -1)
+                {
                     httpRequest.Headers.Add(lines[i].Substring(0, separatorIndex), lines[i].Substring(separatorIndex + 1).Trim());
+                }
 
                 i++;
+
                 // trim end carriage return of each line
                 lines[i] = lines[i].TrimEnd(CR);
             }
@@ -161,7 +167,7 @@ namespace HttpServer
             if (httpRequest.Headers.ContainsKey("Content-Length"))
             {
                 httpRequest.ContentLength = Convert.ToInt64(httpRequest.Headers["Content-Length"]);
-                httpRequest.Body = lines[i].TrimEnd(CR).Substring(0, Convert.ToInt32(httpRequest.Headers["Content-Length"].ToString()));
+                httpRequest.Body = lines[i].TrimEnd(CR).Substring(0, Convert.ToInt32(httpRequest.Headers["Content-Length"]));
             }
 
             if (httpRequest.Headers.ContainsKey("Content-Type"))
@@ -171,16 +177,19 @@ namespace HttpServer
 
             // fill form parameters collection
             if (httpRequest.Headers.ContainsKey("Content-Type") &&
-                (httpRequest.Headers["Content-Type"].StartsWith("application/x-www-form-urlencoded")))
+                httpRequest.Headers["Content-Type"].StartsWith("application/x-www-form-urlencoded"))
             {
                 string[] formParams = httpRequest.Body.Split(FORM_PARAMS_SEPARATOR);
                 foreach (string formParam in formParams)
                 {
                     string[] formParamTokens = formParam.Split(FORM_VALUE_SEPARATOR);
                     string formParamValue = null;
+
                     // if there is key-value pair
                     if (formParamTokens.Length == 2)
+                    {
                         formParamValue = formParamTokens[1];
+                    }
 
                     // httpRequest.Form.Add(formParamTokens[0], HttpServerUtility.HtmlDecode(formParamValue));
                     httpRequest.Form.Add(formParamTokens[0], Uri.UnescapeDataString(formParamValue));

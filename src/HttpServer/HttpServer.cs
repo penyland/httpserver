@@ -1,22 +1,22 @@
-﻿using System;
-using System.Collections.Concurrent;
+﻿// Copyright (c) Peter Nylander.  All rights reserved.
+
+using HttpServer.Platform;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Linq;
 using System.Net;
 using System.Text;
-using System.Threading.Tasks;
-using Windows.Networking.Sockets;
-using Windows.Storage.Streams;
 
 namespace HttpServer
 {
     public class HttpServer : IDisposable
     {
-        public delegate void LogPrintDelegate(String msg);
+        public delegate void LogPrintDelegate(string msg);
+
         public event LogPrintDelegate OnLogMsg;
 
-        public int Port { get; private set; }
+        // socket instance for listening incoming request
+        private readonly ISocketListener socketListener;
 
         #region Constants ...
 
@@ -25,64 +25,59 @@ namespace HttpServer
 
         // Default maximum concurrency
         private const int WORKER_COUNT = 2;
+
         // default webroot directory
         private const string WEBROOT_DEFAULT = @"\webroot\";
+
         // size of response buffer
         private const int BUFFER_RESPONSE_SIZE = 8192;
+
         // default start page
         public const string DEFAULT_PAGE = "index.html";
 
         #endregion
 
-        #region Fields ...
-
-        // socket instance for listening incoming request
-        private readonly StreamSocketListener listener;
+        #region Fields
 
         // Web Server running status
         private bool isRunning;
 
         // request queue
-        private ProducerConsumerQueue requestQueue;
+        private readonly ProducerConsumerQueue requestQueue;
 
         // handlers for incoming request
-        private Dictionary<string, IHttpHandler> Handlers = new Dictionary<string, IHttpHandler>();
+        private readonly Dictionary<string, IHttpHandler> handlers = new Dictionary<string, IHttpHandler>();
 
         // handler for access to Web Server file system
-        private FileSystemHandler fileSystemHandler;
+        private readonly FileSystemHandler fileSystemHandler;
 
         #endregion
 
-        public HttpServer(int port)
+        public HttpServer(int port, ISocketListener socketListener)
         {
             this.Port = port;
+            this.socketListener = socketListener;
+            this.socketListener.ConnectionReceived += listener_ConnectionReceived;
 
             this.requestQueue = new ProducerConsumerQueue(WORKER_COUNT);
 
-            this.listener = new StreamSocketListener();
-            this.listener.ConnectionReceived += listener_ConnectionReceived;
+            //this.listener = new StreamSocketListener();
+            //this.listener.ConnectionReceived += listener_ConnectionReceived;
             this.fileSystemHandler = new FileSystemHandler();
         }
 
-        async void listener_ConnectionReceived(StreamSocketListener sender, StreamSocketListenerConnectionReceivedEventArgs args)
-        {
-            await this.requestQueue.Enqueue(() =>
-                {
-                    this.ProcessRequestAsync(args.Socket);
-                }
-                , new System.Threading.CancellationToken());
-        }
+        public int Port { get; }
 
         public void Dispose()
         {
-            this.listener.Dispose();
+            this.socketListener.Dispose();
         }
 
-        public async void Start()
+        public async void StartAsync()
         {
             try
             {
-                await this.listener.BindServiceNameAsync(this.Port.ToString());
+                await this.socketListener.BindServiceNameAsync(this.Port.ToString());
 
                 this.isRunning = true;
             }
@@ -100,7 +95,7 @@ namespace HttpServer
             try
             {
                 this.requestQueue.Dispose();
-                this.listener.Dispose();
+                this.socketListener.Dispose();
 
                 this.isRunning = false;
             }
@@ -110,7 +105,31 @@ namespace HttpServer
             }
         }
 
-        private async void ProcessRequestAsync(StreamSocket requestSocket)
+        /// <summary>
+        /// Register an HTTP handler for incoming request
+        /// </summary>
+        /// <param name="url">URL for mapping the handler execution</param>
+        /// <param name="handler">HTTP handler for the incoming request on specified URL</param>
+        public void RegisterHandler(string url, IHttpHandler handler)
+        {
+            if (handler != null && (url != null) && !string.IsNullOrEmpty(url))
+            {
+                this.handlers.Add(url.Trim('/').ToLower(), handler);
+            }
+            else
+            {
+                throw new ArgumentNullException("url parameter cannot be null or empty");
+            }
+        }
+
+        private async void listener_ConnectionReceived(object sender, ISocket args)
+        {
+            await this.requestQueue.Enqueue(
+                () => this.ProcessRequestAsync(args),
+                default(System.Threading.CancellationToken));
+        }
+
+        private async void ProcessRequestAsync(ISocket requestSocket)
         {
             HttpRequest httpRequest = null;
             bool badRequest = false;
@@ -118,7 +137,7 @@ namespace HttpServer
             try
             {
                 // parse incoming request
-                httpRequest = await HttpRequest.Parse(requestSocket);
+                httpRequest = await HttpRequest.ParseAsync(requestSocket);
             }
             catch
             {
@@ -128,17 +147,17 @@ namespace HttpServer
             }
 
             // create an HTTP context for the current request
-            HttpContext httpContext = new HttpContext(httpRequest);
+            var httpContext = new HttpContext(httpRequest);
 
             if (badRequest)
             {
-                LogMessage("Bad request to " + httpContext.Request.URL);
+                this.LogMessage("Bad request to " + httpContext.Request.URL);
                 httpContext.Response.StatusCode = HttpStatusCode.BadRequest;
                 httpContext.Response.Body = null;
             }
             else
             {
-                LogMessage("Request to " + httpContext.Request.URL);
+                this.LogMessage("Request to " + httpContext.Request.URL);
                 try
                 {
                     // Resolve Request handler for the request
@@ -173,16 +192,19 @@ namespace HttpServer
             // Build HttpResponse
 
             // build the status line
-            StringBuilder responseBuilder = new StringBuilder("HTTP/1.1 ");
+            var responseBuilder = new StringBuilder("HTTP/1.1 ");
             responseBuilder.Append(((int)httpContext.Response.StatusCode).ToString());
             responseBuilder.Append(" ");
             responseBuilder.AppendLine(this.MapStatusCodeToReason(httpContext.Response.StatusCode));
 
             // build header section
             httpContext.Response.Headers["Content-Type"] = httpContext.Response.ContentType;
-            int bodyLength = ((httpContext.Response.Body != null) && (httpContext.Response.Body != String.Empty)) ? httpContext.Response.Body.Length : 0;
+            int bodyLength = (!string.IsNullOrEmpty(httpContext.Response.Body)) ? httpContext.Response.Body.Length : 0;
             if (bodyLength > 0)
+            {
                 httpContext.Response.Headers["Content-Length"] = bodyLength.ToString();
+            }
+
             httpContext.Response.Headers["Connection"] = "close";
 
             foreach (string responseHeaderKey in httpContext.Response.Headers.Keys)
@@ -194,6 +216,7 @@ namespace HttpServer
 
             // line blank seperation header-body
             responseBuilder.AppendLine();
+
             // start sending status line and headers
             byte[] buffer = Encoding.UTF8.GetBytes(responseBuilder.ToString());
 
@@ -210,6 +233,7 @@ namespace HttpServer
                     dataWriter.WriteBytes(buffer);
                     await dataWriter.StoreAsync();
                 }
+
                 // no body, streamed response
                 else
                 {
@@ -223,6 +247,7 @@ namespace HttpServer
                             dataWriter.WriteBytes(outBuffer);
                             await dataWriter.StoreAsync();
                         }
+
                         httpContext.Response.CloseStream();
                     }
                 }
@@ -231,7 +256,6 @@ namespace HttpServer
             {
                 Debug.WriteLine("Exception: " + e.Message + " " + e.InnerException);
             }
-
         }
 
         /// <summary>
@@ -251,25 +275,13 @@ namespace HttpServer
             else
             {
                 // check URL for handler
-                if (this.Handlers.ContainsKey(httpContext.Request.URL))
+                if (this.handlers.ContainsKey(httpContext.Request.URL))
                 {
-                    return (IHttpHandler)this.Handlers[httpContext.Request.URL];
+                    return (IHttpHandler)this.handlers[httpContext.Request.URL];
                 }
             }
-            return handler;
-        }
 
-        /// <summary>
-        /// Register an HTTP handler for incoming request
-        /// </summary>
-        /// <param name="url">URL for mapping the handler execution</param>
-        /// <param name="handler">HTTP handler for the incoming request on specified URL</param>
-        public void RegisterHandler(string url, IHttpHandler handler)
-        {
-            if (handler != null && (url != null) && !String.IsNullOrEmpty(url))
-                this.Handlers.Add(url.Trim('/').ToLower(), handler);
-            else
-                throw new ArgumentNullException("url parameter cannot be null or empty");
+            return handler;
         }
 
         /// <summary>
@@ -279,43 +291,34 @@ namespace HttpServer
         /// <returns>Reason mapped</returns>
         private string MapStatusCodeToReason(HttpStatusCode statusCode)
         {
-            string reason = null;
             switch (statusCode)
             {
                 case HttpStatusCode.OK:
-                    reason = "OK";
-                    break;
+                    return "OK";
                 case HttpStatusCode.Found:
-                    reason = "Found";
-                    break;
+                    return "Found";
                 case HttpStatusCode.BadRequest:
-                    reason = "Bad request";
-                    break;
+                    return "Bad request";
                 case HttpStatusCode.Unauthorized:
-                    reason = "Unauthorized";
-                    break;
+                    return "Unauthorized";
                 case HttpStatusCode.Forbidden:
-                    reason = "Forbidden";
-                    break;
+                    return "Forbidden";
                 case HttpStatusCode.NotFound:
-                    reason = "Not found";
-                    break;
+                    return "Not found";
                 case HttpStatusCode.MethodNotAllowed:
-                    reason = "Method not allowed";
-                    break;
+                    return "Method not allowed";
                 case HttpStatusCode.InternalServerError:
-                    reason = "Internal server error";
-                    break;
+                    return "Internal server error";
                 case HttpStatusCode.ServiceUnavailable:
-                    reason = "Service unavailable";
-                    break;
+                    return "Service unavailable";
             }
-            return reason;
+
+            return null;
         }
 
         private void LogMessage(string message)
         {
-            if (OnLogMsg != null) OnLogMsg(message);
+            this.OnLogMsg?.Invoke(message);
         }
     }
 }

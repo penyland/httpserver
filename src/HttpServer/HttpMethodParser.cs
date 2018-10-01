@@ -20,7 +20,7 @@ namespace HttpServer
 
     internal class HttpMethodParser
     {
-        public static HttpMethod Parse(String method)
+        public static HttpMethod Parse(string method)
         {
             switch (method)
             {
