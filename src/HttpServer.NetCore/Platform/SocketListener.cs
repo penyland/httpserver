@@ -8,39 +8,31 @@ using System.Threading.Tasks;
 
 namespace HttpServer.NetCore.Platform
 {
-    internal class SocketListener : ISocketListener
+    public class SocketListener : ISocketListener
     {
         private readonly TcpListener socketListener;
 
-        public SocketListener()
+        public SocketListener(int port)
         {
-            this.socketListener = new TcpListener(new IPEndPoint(IPAddress.Any, 80));
-            //this.socketListener.ConnectionReceived += this.SocketListener_ConnectionReceived;
-
-            this.socketListener.AcceptSocketAsync();
+            this.socketListener = new TcpListener(new IPEndPoint(IPAddress.Any, port));
         }
 
-        public event EventHandler<ISocket> ConnectionReceived;
+        public event EventHandler<TcpClient> ConnectionReceived;
 
-        public Task BindServiceNameAsync(string localServiceName)
+        public async Task BindServiceNameAsync(string localServiceName)
         {
-            return Task.FromResult<object>(null);
-
-            //return this.socketListener.BindServiceNameAsync(localServiceName).AsTask();
+            TcpClient tcpClient = await this.socketListener.AcceptTcpClientAsync();
+            this.ConnectionReceived?.Invoke(this, tcpClient);
         }
 
-        public void Dispose()
+        public void Start()
         {
-            //this.socketListener.Dispose();
+            this.socketListener.Start();
         }
 
-        //private void SocketListener_ConnectionReceived(StreamSocketListener sender, StreamSocketListenerConnectionReceivedEventArgs args)
-        //{
-        //    StreamSocket streamSocket = args.Socket;
-
-        //    var socket = new Socket(streamSocket);
-
-        //    this.ConnectionReceived?.Invoke(this, socket);
-        //}
+        public void Stop()
+        {
+            this.socketListener.Stop();
+        }
     }
 }

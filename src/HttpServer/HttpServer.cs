@@ -4,8 +4,12 @@ using HttpServer.Platform;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Net;
+using System.Net.Sockets;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace HttpServer
 {
@@ -39,11 +43,13 @@ namespace HttpServer
 
         #region Fields
 
+        // request queue
+        private readonly ProducerConsumerQueue requestQueue;
+
         // Web Server running status
         private bool isRunning;
 
-        // request queue
-        private readonly ProducerConsumerQueue requestQueue;
+        private CancellationTokenSource cancellationTokenSource;
 
         // handlers for incoming request
         private readonly Dictionary<string, IHttpHandler> handlers = new Dictionary<string, IHttpHandler>();
@@ -57,12 +63,9 @@ namespace HttpServer
         {
             this.Port = port;
             this.socketListener = socketListener;
-            this.socketListener.ConnectionReceived += listener_ConnectionReceived;
+            this.socketListener.ConnectionReceived += this.ConnectionReceivedAsync;
 
             this.requestQueue = new ProducerConsumerQueue(WORKER_COUNT);
-
-            //this.listener = new StreamSocketListener();
-            //this.listener.ConnectionReceived += listener_ConnectionReceived;
             this.fileSystemHandler = new FileSystemHandler();
         }
 
@@ -70,14 +73,15 @@ namespace HttpServer
 
         public void Dispose()
         {
-            this.socketListener.Dispose();
         }
 
-        public async void StartAsync()
+        public void Start()
         {
             try
             {
-                await this.socketListener.BindServiceNameAsync(this.Port.ToString());
+                this.cancellationTokenSource = new CancellationTokenSource();
+
+                var listenerTask = Task.Run(this.ListenToConnectionsAsync, this.cancellationTokenSource.Token);
 
                 this.isRunning = true;
             }
@@ -94,8 +98,11 @@ namespace HttpServer
         {
             try
             {
+                this.cancellationTokenSource.Cancel();
+                this.cancellationTokenSource = null;
+
                 this.requestQueue.Dispose();
-                this.socketListener.Dispose();
+                this.socketListener.Stop();
 
                 this.isRunning = false;
             }
@@ -122,14 +129,24 @@ namespace HttpServer
             }
         }
 
-        private async void listener_ConnectionReceived(object sender, ISocket args)
+        private async Task ListenToConnectionsAsync()
+        {
+            this.socketListener.Start();
+
+            while (this.isRunning && !this.cancellationTokenSource.IsCancellationRequested)
+            {
+                await this.socketListener.BindServiceNameAsync(this.Port.ToString());
+            }
+        }
+
+        private async void ConnectionReceivedAsync(object sender, TcpClient args)
         {
             await this.requestQueue.Enqueue(
                 () => this.ProcessRequestAsync(args),
                 default(System.Threading.CancellationToken));
         }
 
-        private async void ProcessRequestAsync(ISocket requestSocket)
+        private async void ProcessRequestAsync(TcpClient requestClient)
         {
             HttpRequest httpRequest = null;
             bool badRequest = false;
@@ -137,7 +154,7 @@ namespace HttpServer
             try
             {
                 // parse incoming request
-                httpRequest = await HttpRequest.ParseAsync(requestSocket);
+                httpRequest = await HttpRequest.ParseAsync(requestClient);
             }
             catch
             {
@@ -192,10 +209,10 @@ namespace HttpServer
             // Build HttpResponse
 
             // build the status line
-            var responseBuilder = new StringBuilder("HTTP/1.1 ");
-            responseBuilder.Append(((int)httpContext.Response.StatusCode).ToString());
-            responseBuilder.Append(" ");
-            responseBuilder.AppendLine(this.MapStatusCodeToReason(httpContext.Response.StatusCode));
+            var responseHeaderBuilder = new StringBuilder("HTTP/1.1 ");
+            responseHeaderBuilder.Append(((int)httpContext.Response.StatusCode).ToString());
+            responseHeaderBuilder.Append(" ");
+            responseHeaderBuilder.AppendLine(Utils.MapStatusCodeToReason(httpContext.Response.StatusCode));
 
             // build header section
             httpContext.Response.Headers["Content-Type"] = httpContext.Response.ContentType;
@@ -209,46 +226,60 @@ namespace HttpServer
 
             foreach (string responseHeaderKey in httpContext.Response.Headers.Keys)
             {
-                responseBuilder.Append(responseHeaderKey);
-                responseBuilder.Append(": ");
-                responseBuilder.AppendLine(httpContext.Response.Headers[responseHeaderKey]);
+                responseHeaderBuilder.Append(responseHeaderKey);
+                responseHeaderBuilder.Append(": ");
+                responseHeaderBuilder.AppendLine(httpContext.Response.Headers[responseHeaderKey]);
             }
 
             // line blank seperation header-body
-            responseBuilder.AppendLine();
+            responseHeaderBuilder.AppendLine();
 
             // start sending status line and headers
-            byte[] buffer = Encoding.UTF8.GetBytes(responseBuilder.ToString());
+            byte[] buffer = Encoding.UTF8.GetBytes(responseHeaderBuilder.ToString());
+            //char[] buffer = responseHeaderBuilder.ToString().ToCharArray();
 
             try
             {
-                DataWriter dataWriter = new DataWriter(requestSocket.OutputStream);
-                dataWriter.WriteBytes(buffer);
-                await dataWriter.StoreAsync();
-
-                //// send body, if it exists
-                if (bodyLength > 0)
+                using (var streamWriter = new StreamWriter(requestClient.GetStream()))
                 {
-                    buffer = Encoding.UTF8.GetBytes(httpContext.Response.Body);
-                    dataWriter.WriteBytes(buffer);
-                    await dataWriter.StoreAsync();
-                }
+                    await streamWriter.WriteAsync(responseHeaderBuilder.ToString());
+                    await streamWriter.FlushAsync();
 
-                // no body, streamed response
-                else
-                {
-                    if (httpContext.Response.Stream != null)
+                    //DataWriter dataWriter = new DataWriter(requestSocket.OutputStream);
+                    //dataWriter.WriteBytes(buffer);
+                    //await dataWriter.StoreAsync();
+
+                    //// send body, if it exists
+                    if (bodyLength > 0)
                     {
-                        byte[] sendBuffer = new byte[512];
-                        int sendBytes = 0;
-                        while ((sendBytes = httpContext.Response.Stream.Read(sendBuffer, 0, sendBuffer.Length)) > 0)
+                        //buffer = Encoding.UTF8.GetBytes(httpContext.Response.Body);
+                        //dataWriter.WriteBytes(buffer);
+                        //await dataWriter.StoreAsync();
+                        await streamWriter.WriteAsync(httpContext.Response.Body);
+                        await streamWriter.FlushAsync();
+                    }
+                    else // no body, streamed response
+                    {
+                        if (httpContext.Response.Stream != null)
                         {
-                            byte[] outBuffer = new byte[sendBytes];
-                            dataWriter.WriteBytes(outBuffer);
-                            await dataWriter.StoreAsync();
-                        }
+                            byte[] sendBuffer = new byte[512];
+                            int sendBytes = 0;
+                            while ((sendBytes = httpContext.Response.Stream.Read(sendBuffer, 0, sendBuffer.Length)) > 0)
+                            {
+                                byte[] outBuffer = new byte[sendBytes];
 
-                        httpContext.Response.CloseStream();
+                                using (var binaryWriter = new BinaryWriter(requestClient.GetStream()))
+                                {
+                                    binaryWriter.Write(sendBuffer);
+                                    binaryWriter.Flush();
+                                }
+
+                                //dataWriter.WriteBytes(outBuffer);
+                                //await dataWriter.StoreAsync();
+                            }
+
+                            httpContext.Response.CloseStream();
+                        }
                     }
                 }
             }
@@ -282,38 +313,6 @@ namespace HttpServer
             }
 
             return handler;
-        }
-
-        /// <summary>
-        /// Map an HTTP status code to reason string
-        /// </summary>
-        /// <param name="statusCode">HTTP status code</param>
-        /// <returns>Reason mapped</returns>
-        private string MapStatusCodeToReason(HttpStatusCode statusCode)
-        {
-            switch (statusCode)
-            {
-                case HttpStatusCode.OK:
-                    return "OK";
-                case HttpStatusCode.Found:
-                    return "Found";
-                case HttpStatusCode.BadRequest:
-                    return "Bad request";
-                case HttpStatusCode.Unauthorized:
-                    return "Unauthorized";
-                case HttpStatusCode.Forbidden:
-                    return "Forbidden";
-                case HttpStatusCode.NotFound:
-                    return "Not found";
-                case HttpStatusCode.MethodNotAllowed:
-                    return "Method not allowed";
-                case HttpStatusCode.InternalServerError:
-                    return "Internal server error";
-                case HttpStatusCode.ServiceUnavailable:
-                    return "Service unavailable";
-            }
-
-            return null;
         }
 
         private void LogMessage(string message)

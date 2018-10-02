@@ -3,6 +3,9 @@
 using HttpServer.Platform;
 using System;
 using System.Diagnostics;
+using System.IO;
+using System.Net.Sockets;
+using System.Text;
 using System.Threading.Tasks;
 
 namespace HttpServer
@@ -12,9 +15,6 @@ namespace HttpServer
     /// </summary>
     public class HttpRequest : HttpBase
     {
-        // size of request buffer
-        private const int BUFFERREQUESTSIZE = 1024;
-
         /// <summary>
         /// Initializes a new instance of the <see cref="HttpRequest"/> class.
         /// </summary>
@@ -65,35 +65,22 @@ namespace HttpServer
         /// <summary>
         /// Parse the request
         /// </summary>
-        /// <param name="requestSocket">Socket</param>
+        /// <param name="requestClient"></param>
         /// <returns>A <see cref="Task"/> representing the asynchronous operation.</returns>
-        internal static async Task<HttpRequest> ParseAsync(ISocket requestSocket)
+        internal static async Task<HttpRequest> ParseAsync(TcpClient requestClient)
         {
-            string request = string.Empty;
+            StringBuilder request = await ReadRequestHeaderAsync(requestClient.GetStream());
 
-            // TODO: Read only header at first to avoid OOM exceptions
-            //       Read one byte at the time and check if we have found the ending of the header. Ending of the header is two \r\n in a row
-            //       We can then extract content length and check if it's too large.
-            // TODO: Expose body as (memory?) stream
-            using (DataReader dataReader = new DataReader(requestSocket.InputStream))
-            {
-                dataReader.InputStreamOptions = InputStreamOptions.Partial;
+            //    request = request.TrimEnd('\0');
 
-                uint sizeFieldCount = await dataReader.LoadAsync(BUFFERREQUESTSIZE);
-
-                // Read HTTP Header
-                request = dataReader.ReadString(dataReader.UnconsumedBufferLength);
-                request = request.TrimEnd('\0');
-            }
-
-            Debug.WriteLine(request);
+            Console.WriteLine(request);
 
             var httpRequest = new HttpRequest();
 
-            httpRequest.UserHostAddress = requestSocket.Information.RemoteHostName.ToString();
+            httpRequest.UserHostAddress = requestClient.Client.RemoteEndPoint.ToString();
 
             // split request lines on line feed
-            string[] lines = request.Split(LF);
+            string[] lines = request.ToString().Split(LF);
 
             int i = 0;
 
@@ -197,6 +184,30 @@ namespace HttpServer
             }
 
             return httpRequest;
+        }
+
+        internal static async Task<StringBuilder> ReadRequestHeaderAsync(Stream stream)
+        {
+            var request = new StringBuilder();
+
+            // TODO: Read only header at first to avoid OOM exceptions
+            //       Read one byte at the time and check if we have found the ending of the header. Ending of the header is two \r\n in a row
+            //       We can then extract content length and check if it's too large.
+
+            // TODO: Expose body as (memory?) stream
+
+            var streamReader = new StreamReader(stream);
+            string headerLine;
+            while ((headerLine = await streamReader.ReadLineAsync()) != string.Empty)
+            {
+                request.AppendLine(headerLine);
+            }
+
+            return request;
+        }
+
+        private void ParseRequestLine(string[] lines)
+        {
         }
     }
 }
