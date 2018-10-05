@@ -49,5 +49,10 @@ namespace HttpServer
         {
             this.CloseStream();
         }
+
+        private void BuildResponseHeader()
+        {
+
+        }
     }
 }

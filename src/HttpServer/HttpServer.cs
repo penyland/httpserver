@@ -236,7 +236,6 @@ namespace HttpServer
 
             // start sending status line and headers
             byte[] buffer = Encoding.UTF8.GetBytes(responseHeaderBuilder.ToString());
-            //char[] buffer = responseHeaderBuilder.ToString().ToCharArray();
 
             try
             {
@@ -245,16 +244,9 @@ namespace HttpServer
                     await streamWriter.WriteAsync(responseHeaderBuilder.ToString());
                     await streamWriter.FlushAsync();
 
-                    //DataWriter dataWriter = new DataWriter(requestSocket.OutputStream);
-                    //dataWriter.WriteBytes(buffer);
-                    //await dataWriter.StoreAsync();
-
                     //// send body, if it exists
                     if (bodyLength > 0)
                     {
-                        //buffer = Encoding.UTF8.GetBytes(httpContext.Response.Body);
-                        //dataWriter.WriteBytes(buffer);
-                        //await dataWriter.StoreAsync();
                         await streamWriter.WriteAsync(httpContext.Response.Body);
                         await streamWriter.FlushAsync();
                     }
@@ -273,9 +265,6 @@ namespace HttpServer
                                     binaryWriter.Write(sendBuffer);
                                     binaryWriter.Flush();
                                 }
-
-                                //dataWriter.WriteBytes(outBuffer);
-                                //await dataWriter.StoreAsync();
                             }
 
                             httpContext.Response.CloseStream();

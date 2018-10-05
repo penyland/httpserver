@@ -4,7 +4,7 @@ using System.Net;
 
 namespace HttpServer
 {
-    class Utils
+    public static class Utils
     {
         /// <summary>
         /// Map an HTTP status code to reason string

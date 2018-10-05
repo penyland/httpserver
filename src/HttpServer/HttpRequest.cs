@@ -4,8 +4,10 @@ using HttpServer.Platform;
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Net.Sockets;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
 namespace HttpServer
@@ -71,8 +73,6 @@ namespace HttpServer
         {
             StringBuilder request = await ReadRequestHeaderAsync(requestClient.GetStream());
 
-            //    request = request.TrimEnd('\0');
-
             Console.WriteLine(request);
 
             var httpRequest = new HttpRequest();
@@ -119,7 +119,6 @@ namespace HttpServer
                             queryStringParamValue = queryStringParamTokens[1];
                         }
 
-                        // httpRequest.QueryString.Add(queryStringParamTokens[0], HttpServerUtility.HtmlDecode(queryStringParamValue));
                         httpRequest.QueryString.Add(queryStringParamTokens[0], Uri.UnescapeDataString(queryStringParamValue));
                     }
                 }
@@ -195,7 +194,6 @@ namespace HttpServer
             //       We can then extract content length and check if it's too large.
 
             // TODO: Expose body as (memory?) stream
-
             var streamReader = new StreamReader(stream);
             string headerLine;
             while ((headerLine = await streamReader.ReadLineAsync()) != string.Empty)
